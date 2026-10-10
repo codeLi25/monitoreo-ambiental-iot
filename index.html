@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo Ambiental IoT</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: Arial, sans-serif;
+    }
+
+    header {
+      background: #1e293b;
+      padding: 25px 20px;
+      text-align: center;
+      border-bottom: 1px solid #334155;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      margin-top: 10px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 35px auto;
+      padding: 0 20px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 22px;
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 18px;
+      padding: 32px 20px;
+      text-align: center;
+      box-shadow: 0 10px 25px #0002;
+    }
+
+    .card h2 {
+      color: #cbd5e1;
+      font-size: 19px;
+      margin-top: 0;
+    }
+
+    .valor {
+      font-size: 50px;
+      font-weight: bold;
+      margin: 25px 0;
+    }
+
+    .temperatura { color: #fb923c; }
+    .humedad { color: #38bdf8; }
+
+    .descripcion {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .panel {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 25px;
+      margin-top: 25px;
+    }
+
+    .panel h2 {
+      margin-top: 0;
+      font-size: 20px;
+    }
+
+    .estado {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: bold;
+    }
+
+    .punto {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: #facc15;
+      flex-shrink: 0;
+    }
+
+    .punto.activo { background: #4ade80; }
+    .punto.inactivo { background: #f87171; }
+
+    .detalle {
+      color: #94a3b8;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    .boton {
+      background: #0284c7;
+      border: 0;
+      color: white;
+      padding: 12px 20px;
+      border-radius: 9px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .boton:hover { background: #0369a1; }
+
+    footer {
+      text-align: center;
+      padding: 30px 15px;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    @media (max-width: 600px) {
+      h1 { font-size: 23px; }
+
+      .cards { grid-template-columns: 1fr; }
+
+      .valor { font-size: 44px; }
+
+      .container { margin-top: 22px; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>Sistema de Monitoreo Ambiental</h1>
+    <p class="subtitle">
+      ESP32 + Sensor DHT11 | Plataforma IoT en la nube
+    </p>
+  </header>
+
+  <main class="container">
+
+    <section class="cards">
+
+      <article class="card">
+        <h2>Temperatura Ambiental</h2>
+        <div class="valor temperatura" id="temperatura">
+          -- °C
+        </div>
+        <p class="descripcion">
+          Temperatura medida en grados Celsius
+        </p>
+      </article>
+
+      <article class="card">
+        <h2>Humedad Relativa</h2>
+        <div class="valor humedad" id="humedad">
+          -- %
+        </div>
+        <p class="descripcion">
+          Porcentaje de humedad del ambiente
+        </p>
+      </article>
+
+    </section>
+
+    <section class="panel">
+      <h2>Estado del monitoreo</h2>
+
+      <div class="estado">
+        <span class="punto" id="puntoEstado"></span>
+        <span id="estadoTexto">Consultando datos...</span>
+      </div>
+
+      <p class="detalle">
+        Última medición:
+        <strong id="fechaMedicion">--</strong>
+      </p>
+
+      <p class="detalle">
+        Actualización automática cada 10 segundos.
+      </p>
+
+      <button class="boton" onclick="actualizarDatos()">
+        Actualizar ahora
+      </button>
+    </section>
+
+  </main>
+
+  <footer>
+    Proyecto IoT | ESP32 + DHT11 + Vercel + Supabase
+  </footer>
+
+  <script>
+    const API = "/api/mediciones";
+    const LIMITE_RECIENTE = 60000;
+
+    const elementoTemperatura =
+      document.getElementById("temperatura");
+
+    const elementoHumedad =
+      document.getElementById("humedad");
+
+    const elementoFecha =
+      document.getElementById("fechaMedicion");
+
+    const elementoEstado =
+      document.getElementById("estadoTexto");
+
+    const puntoEstado =
+      document.getElementById("puntoEstado");
+
+    function cambiarEstado(texto, clase) {
+      elementoEstado.textContent = texto;
+      puntoEstado.className = "punto " + clase;
+    }
+
+    async function actualizarDatos() {
+      try {
+        const respuesta = await fetch(API, {
+          cache: "no-store"
+        });
+
+        if (!respuesta.ok) {
+          throw new Error("Error HTTP " + respuesta.status);
+        }
+
+        const datos = await respuesta.json();
+
+        if (
+          typeof datos.temperatura !== "number" ||
+          typeof datos.humedad !== "number"
+        ) {
+          cambiarEstado("Sin mediciones disponibles", "inactivo");
+          return;
+        }
+
+        elementoTemperatura.textContent =
+          datos.temperatura.toFixed(1) + " °C";
+
+        elementoHumedad.textContent =
+          datos.humedad.toFixed(1) + " %";
+
+        const fecha = new Date(datos.fecha);
+        const fechaValida = !isNaN(fecha.getTime());
+
+        if (fechaValida) {
+          elementoFecha.textContent =
+            fecha.toLocaleString("es-PE", {
+              timeZone: "America/Lima",
+              dateStyle: "medium",
+              timeStyle: "medium"
+            });
+
+          const antiguedad = Date.now() - fecha.getTime();
+
+          if (antiguedad >= 0 &&
+              antiguedad <= LIMITE_RECIENTE) {
+            cambiarEstado(
+              "Datos recientes del ESP32",
+              "activo"
+            );
+          } else {
+            cambiarEstado(
+              "Datos antiguos: verificar el ESP32",
+              "inactivo"
+            );
+          }
+        } else {
+          elementoFecha.textContent = "No disponible";
+          cambiarEstado(
+            "Medición recibida sin fecha válida",
+            "inactivo"
+          );
+        }
+
+      } catch (error) {
+        console.error(error);
+        cambiarEstado(
+          "Error al consultar Vercel",
+          "inactivo"
+        );
+      }
+    }
+
+    actualizarDatos();
+    setInterval(actualizarDatos, 10000);
+  </script>
+
+</body>
+</html>
