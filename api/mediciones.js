@@ -2,86 +2,127 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 export default async function handler(req, res) {
-    // Permitir únicamente GET y POST
-    if (req.method !== "GET" && req.method !== "POST") {
-        res.setHeader("Allow", "GET, POST");
-        return res.status(405).json({
-            error: "Metodo no permitido"
-        });
-    }
 
-    // Consultar la ultima medicion
-    if (req.method === "GET") {
-        const { data, error } = await supabase
-            .from("mediciones")
-            .select("temperatura, humedad, fecha")
-            .order("fecha", { ascending: false })
-            .order("id", { ascending: false })
-            .limit(1)
-            .maybeSingle();
+  // SOLO PERMITIR GET Y POST
+  if (req.method !== "GET" && req.method !== "POST") {
+    res.setHeader("Allow", "GET, POST");
+    return res.status(405).json({
+      error: "Metodo no permitido"
+    });
+  }
 
-        if (error) {
-            console.error("Error de Supabase al consultar:", {
-                code: error.code,
-                message: error.message,
-                details: error.details,
-                hint: error.hint
-            });
+  // CONSULTAR MEDICIONES
+  if (req.method === "GET") {
 
-            return res.status(500).json({
-                error: "Error al consultar mediciones"
-            });
-        }
+    // Si se solicita historial, devolver varios registros
+    if (req.query.historial === "true") {
 
-        return res.status(200).json(data ?? {});
-    }
+      const periodo = req.query.periodo || "1h";
 
-    // Validar la clave enviada por el ESP32
-    const clave = req.headers["x-api-key"];
+      const periodos = {
+        "1h": 60 * 60 * 1000,
+        "24h": 24 * 60 * 60 * 1000,
+        "7d": 7 * 24 * 60 * 60 * 1000
+      };
 
-    if (
-        !process.env.ESP32_API_KEY ||
-        clave !== process.env.ESP32_API_KEY
-    ) {
-        return res.status(401).json({
-            error: "No autorizado"
-        });
-    }
-
-    // Recibir y validar las mediciones
-    const { temperatura, humedad } = req.body ?? {};
-
-    if (
-        typeof temperatura !== "number" ||
-        typeof humedad !== "number" ||
-        !Number.isFinite(temperatura) ||
-        !Number.isFinite(humedad) ||
-        temperatura < -40 ||
-        temperatura > 80 ||
-        humedad < 0 ||
-        humedad > 100
-    ) {
+      if (!periodos[periodo]) {
         return res.status(400).json({
-            error: "Mediciones invalidas"
+          error: "Periodo no valido"
         });
+      }
+
+      const desde = new Date(
+        Date.now() - periodos[periodo]
+      ).toISOString();
+
+      const { data, error } = await supabase
+        .from("mediciones")
+        .select("id, temperatura, humedad, fecha")
+        .gte("fecha", desde)
+        .order("fecha", { ascending: false })
+        .limit(1000);
+
+      if (error) {
+        console.error("Error al consultar historial:", error);
+        return res.status(500).json({
+          error: "Error al consultar historial"
+        });
+      }
+
+      // Devolver registros ordenados del más antiguo
+      // al más reciente para las gráficas
+      return res.status(200).json(
+        (data || []).reverse()
+      );
     }
 
-    const { error } = await supabase
-        .from("mediciones")
-        .insert([{ temperatura, humedad }]);
+    // MANTENER CONSULTA DE ULTIMA MEDICION
+    const { data, error } = await supabase
+      .from("mediciones")
+      .select("temperatura, humedad, fecha")
+      .order("fecha", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-        return res.status(500).json({
-            error: "Error al guardar medicion"
-        });
+      console.error("Error al consultar medicion:", error);
+      return res.status(500).json({
+        error: "Error al consultar mediciones"
+      });
     }
 
-    return res.status(201).json({
-        mensaje: "Medicion guardada correctamente"
+    return res.status(200).json(data ?? {});
+  }
+
+  // AUTORIZACION PARA EL ESP32
+  const clave = req.headers["x-api-key"];
+
+  if (
+    !process.env.ESP32_API_KEY ||
+    clave !== process.env.ESP32_API_KEY
+  ) {
+    return res.status(401).json({
+      error: "No autorizado"
     });
+  }
+
+  // VALIDAR DATOS DEL SENSOR
+  const { temperatura, humedad } = req.body ?? {};
+
+  if (
+    typeof temperatura !== "number" ||
+    typeof humedad !== "number" ||
+    !Number.isFinite(temperatura) ||
+    !Number.isFinite(humedad) ||
+    temperatura < -40 ||
+    temperatura > 80 ||
+    humedad < 0 ||
+    humedad > 100
+  ) {
+    return res.status(400).json({
+      error: "Mediciones invalidas"
+    });
+  }
+
+  // GUARDAR MEDICION EN SUPABASE
+  const { error } = await supabase
+    .from("mediciones")
+    .insert([{ temperatura, humedad }]);
+
+  if (error) {
+    console.error("Error al guardar medicion:", error);
+    return res.status(500).json({
+      error: "Error al guardar medicion"
+    });
+  }
+
+  return res.status(201).json({
+    mensaje: "Medicion guardada correctamente"
+  });
 }
